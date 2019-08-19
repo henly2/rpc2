@@ -25,6 +25,7 @@ const (
 type Server struct {
 	handlers map[string]*handler
 	eventHub *hub.Hub
+	timeout  uint64
 }
 
 type handler struct {
@@ -170,6 +171,7 @@ func (s *Server) ServeCodecWithState(codec Codec, state *State) {
 
 	// Client also handles the incoming connections.
 	c := NewClientWithCodec(codec)
+	c.SetTimeout(s.timeout)
 	c.server = true
 	c.handlers = s.handlers
 	c.State = state
@@ -177,4 +179,9 @@ func (s *Server) ServeCodecWithState(codec Codec, state *State) {
 	s.eventHub.Publish(connectionEvent{c})
 	c.Run()
 	s.eventHub.Publish(disconnectionEvent{c})
+}
+
+// SetTimeout set timeout for call request
+func (s *Server) SetTimeout(sec uint64) {
+	s.timeout = sec
 }

@@ -68,13 +68,10 @@ func (c *Client) SetTimeout(sec uint64) {
 // Run the client's read loop.
 // You must run this method before calling any methods on the server.
 func (c *Client) Run() {
-	c.readLoop()
-}
+	// run call request timeout check
+	go c.monitorLoop()
 
-// Run the client's monitor loop.
-// You must run this method before calling any methods on the server.
-func (c *Client) RunMonitor() {
-	c.monitorLoop()
+	c.readLoop()
 }
 
 // DisconnectNotify returns a channel that is closed
@@ -90,19 +87,21 @@ func (c *Client) Handle(method string, handlerFunc interface{}) {
 
 // monitorLoop check timeout request and set it done by error.
 func (c *Client) monitorLoop() {
-	//var err error
 	if c.timeout == 0 {
-		debugln("rpc2: monitorLoop return because timeout is zero")
+		debugln(fmt.Sprintf("rpc2[%v]: monitorLoop return because timeout is zero", c.server))
 		return
 	}
 
+	debugln(fmt.Sprintf("rpc2[%v]: monitorLoop run...timeout:%d second", c.server, c.timeout))
 	ticker := time.NewTicker(time.Second * time.Duration(c.timeout))
 	defer func() {
 		ticker.Stop()
-		debugln("rpc2: monitorLoop exit")
+		debugln(fmt.Sprintf("rpc2[%v]: monitorLoop exit...", c.server))
 	}()
 
 	cleanTimeoutRequest := func(t time.Time){
+		debugln(fmt.Sprintf("rpc2[%v]: monitorLoop cleanTimeoutRequest...[%v]", c.server, t.String()))
+
 		c.mutex.Lock()
 		defer c.mutex.Unlock()
 
@@ -110,6 +109,7 @@ func (c *Client) monitorLoop() {
 			if t.Sub(call.Time) < time.Second * time.Duration(c.timeout) {
 				continue
 			}
+
 			call.Error = fmt.Errorf("rpc2 call timeout, start time=%d, now time=%d", call.Time.Unix(), t.Unix())
 			call.done()
 
