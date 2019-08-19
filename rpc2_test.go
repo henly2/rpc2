@@ -4,6 +4,7 @@ import (
 	"net"
 	"testing"
 	"time"
+	"fmt"
 )
 
 const (
@@ -21,6 +22,13 @@ func TestTCPGOB(t *testing.T) {
 	}
 
 	srv := NewServer()
+	srv.Handle("timeout", func(client *Client, args *Args, reply *Reply) error {
+		*reply = Reply(args.A + args.B)
+
+		time.Sleep(time.Second*5)
+
+		return nil
+	})
 	srv.Handle("add", func(client *Client, args *Args, reply *Reply) error {
 		*reply = Reply(args.A + args.B)
 
@@ -95,4 +103,30 @@ func TestTCPGOB(t *testing.T) {
 	if err.Error() != "rpc2: can't find method foo" {
 		t.Fatal(err)
 	}
+
+	// Test timeout request
+	func(){
+		conn, err := net.Dial(network, addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		clt := NewClient(conn)
+		clt.Handle("mult", func(client *Client, args *Args, reply *Reply) error {
+			*reply = Reply(args.A * args.B)
+			return nil
+		})
+		clt.SetTimeout(3)
+		go clt.Run()
+		go clt.RunMonitor()
+		defer clt.Close()
+
+		// Test Call.
+		var rep Reply
+		err = clt.Call("timeout", Args{1, 2}, &rep)
+		if err == nil {
+			t.Fatal("not timeout")
+		}
+		fmt.Println(err)
+	}()
 }

@@ -7,6 +7,8 @@ import (
 	"log"
 	"reflect"
 	"sync"
+	"time"
+	"fmt"
 )
 
 // Client represents an RPC Client.
@@ -27,6 +29,7 @@ type Client struct {
 	disconnect chan struct{}
 	State      *State // additional information to associate with client
 	blocking   bool   // whether to block request handling
+	timeout    uint64 // timeout for call request by second
 }
 
 // NewClient returns a new Client to handle requests to the
@@ -46,6 +49,7 @@ func NewClientWithCodec(codec Codec) *Client {
 		handlers:   make(map[string]*handler),
 		disconnect: make(chan struct{}),
 		seq:        1, // 0 means notification.
+		timeout:	0, // 0 means no timeout
 	}
 }
 
@@ -56,10 +60,21 @@ func (c *Client) SetBlocking(blocking bool) {
 	c.blocking = true
 }
 
+// SetTimeout set timeout for call request
+func (c *Client) SetTimeout(sec uint64) {
+	c.timeout = sec
+}
+
 // Run the client's read loop.
 // You must run this method before calling any methods on the server.
 func (c *Client) Run() {
 	c.readLoop()
+}
+
+// Run the client's monitor loop.
+// You must run this method before calling any methods on the server.
+func (c *Client) RunMonitor() {
+	c.monitorLoop()
 }
 
 // DisconnectNotify returns a channel that is closed
@@ -71,6 +86,45 @@ func (c *Client) DisconnectNotify() chan struct{} {
 // Handle registers the handler function for the given method. If a handler already exists for method, Handle panics.
 func (c *Client) Handle(method string, handlerFunc interface{}) {
 	addHandler(c.handlers, method, handlerFunc)
+}
+
+// monitorLoop check timeout request and set it done by error.
+func (c *Client) monitorLoop() {
+	//var err error
+	if c.timeout == 0 {
+		debugln("rpc2: monitorLoop return because timeout is zero")
+		return
+	}
+
+	ticker := time.NewTicker(time.Second * time.Duration(c.timeout))
+	defer func() {
+		ticker.Stop()
+		debugln("rpc2: monitorLoop exit")
+	}()
+
+	cleanTimeoutRequest := func(t time.Time){
+		c.mutex.Lock()
+		defer c.mutex.Unlock()
+
+		for k, call := range c.pending {
+			if t.Sub(call.Time) < time.Second * time.Duration(c.timeout) {
+				continue
+			}
+			call.Error = fmt.Errorf("rpc2 call timeout, start time=%d, now time=%d", call.Time.Unix(), t.Unix())
+			call.done()
+
+			delete(c.pending, k)
+		}
+	}
+
+	for {
+		select {
+		case <- c.disconnect:
+			return
+		case t := <- ticker.C:
+			cleanTimeoutRequest(t)
+		}
+	}
 }
 
 // readLoop reads messages from codec.
@@ -245,6 +299,7 @@ func (c *Client) Go(method string, args interface{}, reply interface{}, done cha
 	call.Method = method
 	call.Args = args
 	call.Reply = reply
+	call.Time = time.Now()
 	if done == nil {
 		done = make(chan *Call, 10) // buffered.
 	} else {
@@ -296,6 +351,7 @@ type Call struct {
 	Reply  interface{} // The reply from the function (*struct).
 	Error  error       // After completion, the error status.
 	Done   chan *Call  // Strobes when call is complete.
+	Time   time.Time   // Call start time
 }
 
 func (c *Client) send(call *Call) {
