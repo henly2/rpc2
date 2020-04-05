@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/henly2/rpc2"
+	"github.com/zl03jsj/rpc2"
 	"log"
 	"net"
 	"time"
