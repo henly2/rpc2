@@ -21,7 +21,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/cenkalti/rpc2"
+	"github.com/zl03jsj/rpc2"
 )
 
 type jsonCodec struct {
